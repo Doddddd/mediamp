@@ -156,4 +156,44 @@ class NativeRuntimeLoadingTest {
             loading.setRuntimeDirectory(runtime, notADir, doExtract = true, validate = false)
         }
     }
+
+    @Test
+    fun `isJnaPresent detects JNA on classpath`() {
+        assertTrue(isJnaPresent())
+    }
+
+    @Test
+    fun `withWindowsDllDirectory executes block when JNA is absent`() {
+        val originalProbe = jnaPresenceProbe
+        try {
+            jnaPresenceProbe = { false }
+            var executed = false
+            val result = withWindowsDllDirectory(File("test"), "test.dll") {
+                executed = true
+                42
+            }
+            assertEquals(42, result)
+            assertTrue(executed)
+        } finally {
+            jnaPresenceProbe = originalProbe
+        }
+    }
+
+    @Test
+    fun `withWindowsDllDirectory decorates UnsatisfiedLinkError when JNA is absent`() {
+        val originalProbe = jnaPresenceProbe
+        try {
+            jnaPresenceProbe = { false }
+            val dir = File("test-dir")
+            val error = assertFailsWith<UnsatisfiedLinkError> {
+                withWindowsDllDirectory(dir, "wrapper.dll") {
+                    throw UnsatisfiedLinkError("dependent dll missing")
+                }
+            }
+            assertTrue(error.message?.contains("net.java.dev.jna:jna") == true)
+            assertTrue(error.message?.contains("wrapper.dll") == true)
+        } finally {
+            jnaPresenceProbe = originalProbe
+        }
+    }
 }

@@ -23,7 +23,7 @@ internal actual fun loadRuntimeWrapperLibrary(runtimeDir: File, libraryName: Str
     }
 
     if (isWindowsRuntime()) {
-        withWindowsDllDirectory(runtimeDir) {
+        withWindowsDllDirectory(runtimeDir, wrapperFile.name) {
             System.load(wrapperFile.absolutePath)
         }
     } else {
@@ -31,27 +31,65 @@ internal actual fun loadRuntimeWrapperLibrary(runtimeDir: File, libraryName: Str
     }
 }
 
-private inline fun <T> withWindowsDllDirectory(runtimeDir: File, block: () -> T): T {
-    val configured = WindowsDllKernel32.INSTANCE.SetDllDirectoryW(WString(runtimeDir.absolutePath))
-    check(configured) {
-        "Failed to add Windows DLL search directory: ${runtimeDir.absolutePath}"
-    }
+internal var jnaPresenceProbe: () -> Boolean = ::detectJnaPresent
+
+private fun detectJnaPresent(): Boolean =
     try {
-        return block()
-    } finally {
-        WindowsDllKernel32.INSTANCE.SetDllDirectoryW(null)
+        Class.forName("com.sun.jna.Native", false, NativeRuntimeLoader::class.java.classLoader)
+        true
+    } catch (_: Throwable) {
+        false
     }
+
+internal fun isJnaPresent(): Boolean = jnaPresenceProbe()
+
+internal fun <T> withWindowsDllDirectory(
+    runtimeDir: File,
+    libraryFileName: String = "",
+    block: () -> T,
+): T {
+    if (!isJnaPresent()) {
+        return try {
+            block()
+        } catch (e: UnsatisfiedLinkError) {
+            throw UnsatisfiedLinkError(
+                "Failed to load native library '$libraryFileName' from ${runtimeDir.absolutePath}. " +
+                    "On Windows, resolving dependent DLLs without JNA may require adding 'net.java.dev.jna:jna' " +
+                    "to your runtime dependencies, or ensuring the runtime directory is added to system PATH. " +
+                    "Cause: ${e.message}",
+            ).apply { initCause(e) }
+        }
+    }
+    return JnaWindowsDllDirectoryHelper.withDllDirectory(runtimeDir, block)
 }
 
-@Suppress("FunctionName")
-private interface WindowsDllKernel32 : StdCallLibrary {
-    fun SetDllDirectoryW(pathName: WString?): Boolean
+/**
+ * Isolated in a helper class so that JNA types (Native, WString, StdCallLibrary)
+ * are only referenced and resolved by the JVM ClassLoader when [isJnaPresent] is true.
+ */
+internal object JnaWindowsDllDirectoryHelper {
+    fun <T> withDllDirectory(runtimeDir: File, block: () -> T): T {
+        val configured = WindowsDllKernel32.INSTANCE.SetDllDirectoryW(WString(runtimeDir.absolutePath))
+        check(configured) {
+            "Failed to add Windows DLL search directory: ${runtimeDir.absolutePath}"
+        }
+        try {
+            return block()
+        } finally {
+            WindowsDllKernel32.INSTANCE.SetDllDirectoryW(null)
+        }
+    }
 
-    companion object {
-        val INSTANCE: WindowsDllKernel32 = Native.load(
-            "kernel32",
-            WindowsDllKernel32::class.java,
-            W32APIOptions.DEFAULT_OPTIONS,
-        ) as WindowsDllKernel32
+    @Suppress("FunctionName")
+    private interface WindowsDllKernel32 : StdCallLibrary {
+        fun SetDllDirectoryW(pathName: WString?): Boolean
+
+        companion object {
+            val INSTANCE: WindowsDllKernel32 = Native.load(
+                "kernel32",
+                WindowsDllKernel32::class.java,
+                W32APIOptions.DEFAULT_OPTIONS,
+            ) as WindowsDllKernel32
+        }
     }
 }

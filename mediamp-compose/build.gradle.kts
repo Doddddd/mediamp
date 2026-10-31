@@ -61,9 +61,6 @@ kotlin {
             }
 
             api(libs.kotlinx.coroutines.swing)
-            implementation(libs.vlcj)
-            implementation(libs.jna)
-            implementation(libs.jna.platform)
         }
         iosMain.dependencies {
             implementation(projects.mediampInternalUtils)

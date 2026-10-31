@@ -27,11 +27,11 @@ kotlin {
     }
     sourceSets {
         desktopMain.dependencies {
-            implementation(libs.jna)
-            implementation(libs.jna.platform)
+            compileOnly(libs.jna)
         }
         getByName("desktopTest").dependencies {
             implementation(kotlin("test"))
+            implementation(libs.jna)
         }
     }
 }
